@@ -1,6 +1,6 @@
 use strum::IntoEnumIterator;
 
-use crate::config::{DEFAULT_PRICE, PRICE_EMA_ALPHA, RESOURCE_COUNT};
+use crate::config::{DEFAULT_PRICE, MAX_PRICE, MIN_PRICE, PRICE_EMA_ALPHA, RESOURCE_COUNT};
 use crate::inventory::{self, ResourceVec};
 use crate::order::{Order, Trade};
 use crate::orderbook::OrderBook;
@@ -40,12 +40,17 @@ impl Market {
             book.clear();
         }
 
-        // Update last prices with EMA
+        // Update last prices with EMA from actual trade prices
         for trade in &self.trades_this_tick {
             let idx = trade.resource as usize;
             debug_assert!(idx < RESOURCE_COUNT);
             let old = self.last_prices[idx];
             self.last_prices[idx] = old * (1.0 - PRICE_EMA_ALPHA) + trade.price * PRICE_EMA_ALPHA;
+        }
+
+        // Clamp prices to valid range
+        for p in self.last_prices.iter_mut() {
+            *p = p.clamp(MIN_PRICE, MAX_PRICE);
         }
     }
 

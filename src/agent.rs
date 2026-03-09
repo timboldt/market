@@ -40,6 +40,9 @@ impl Agent {
                 let available = inventory::get(&self.inventory, res);
                 max_runs = max_runs.min((available / qty).floor());
             }
+            // Cap runs so output doesn't exceed surplus threshold
+            let room = (output_cap - output_have) / recipe.output_qty;
+            max_runs = max_runs.min(room.floor().max(0.0));
             if max_runs < 1.0 {
                 continue;
             }
@@ -129,6 +132,11 @@ pub fn generate_orders_with_context(
 
     let mut budget = agent.gold;
 
+    // Compute cost-floor for intermediaries: don't sell below input cost + margin
+    let total_input_cost: f32 = Resource::iter()
+        .map(|res| inventory::get(input_rates, res) * inventory::get(last_prices, res))
+        .sum();
+
     // === SELL surplus production first (generates gold for buys) ===
     for r in Resource::iter() {
         if !produced.contains(&r) {
@@ -142,7 +150,21 @@ pub fn generate_orders_with_context(
         let buffer = (consume_rate + prod_rate) * COMFORT_BUFFER_TICKS;
         let surplus = have - buffer;
         if surplus > MIN_ORDER_QTY {
-            let sell_price = (price * SELL_PRICE_FACTOR).max(MIN_PRICE);
+            // Dynamic sell pricing: lower price when inventory is full, higher when scarce
+            let cap = prod_rate * SURPLUS_THRESHOLD;
+            let fullness = if cap > 0.0 {
+                (have / cap).clamp(0.1, 1.0)
+            } else {
+                0.5
+            };
+            let sell_factor = SELL_PRICE_HIGH - (SELL_PRICE_HIGH - SELL_PRICE_LOW) * fullness;
+            // Cost floor: intermediaries never sell below input cost + 30% margin
+            let cost_floor = if prod_rate > 0.0 {
+                (total_input_cost / prod_rate) * 1.3
+            } else {
+                0.0
+            };
+            let sell_price = (price * sell_factor).max(cost_floor).max(MIN_PRICE);
             orders.push(Order {
                 id: *next_order_id,
                 agent_id: agent.id,
@@ -172,11 +194,10 @@ pub fn generate_orders_with_context(
             } else {
                 f32::MAX
             };
-            let buy_price = if ticks_supply < URGENCY_THRESHOLD {
-                (price * URGENCY_PREMIUM).max(MIN_PRICE)
-            } else {
-                (price * BUY_PRICE_FACTOR).max(MIN_PRICE)
-            };
+            // Dynamic buy pricing: higher urgency when supply is low
+            let urgency = (1.0 - ticks_supply / (INPUT_TARGET_TICKS * 2.0)).clamp(0.0, 1.0);
+            let buy_factor = BUY_PRICE_LOW + (BUY_PRICE_HIGH - BUY_PRICE_LOW) * urgency;
+            let buy_price = (price * buy_factor).max(MIN_PRICE);
             let max_qty = budget / buy_price;
             let qty = deficit.min(max_qty);
             if qty > MIN_ORDER_QTY {
@@ -211,11 +232,10 @@ pub fn generate_orders_with_context(
         let deficit = target - have;
 
         if deficit > MIN_ORDER_QTY && budget > 1.0 {
-            let buy_price = if ticks_supply < URGENCY_THRESHOLD {
-                (price * URGENCY_PREMIUM).max(MIN_PRICE)
-            } else {
-                (price * BUY_PRICE_FACTOR).max(MIN_PRICE)
-            };
+            // Dynamic buy pricing: higher urgency when supply is low
+            let urgency = (1.0 - ticks_supply / (TARGET_INVENTORY_TICKS * 2.0)).clamp(0.0, 1.0);
+            let buy_factor = BUY_PRICE_LOW + (BUY_PRICE_HIGH - BUY_PRICE_LOW) * urgency;
+            let buy_price = (price * buy_factor).max(MIN_PRICE);
             let max_qty = budget / buy_price;
             let qty = deficit.min(max_qty);
             if qty > MIN_ORDER_QTY {
@@ -289,13 +309,15 @@ fn merchant_orders(
 pub fn create_agents() -> Vec<Agent> {
     let mut agents = Vec::new();
 
-    // 0: Farmer - produces grain, consumes flour (food) + tools
+    // 0: Farmer - produces grain, consumes flour (food) + tools + planks
     let mut c = inventory::empty_vec();
-    inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
+    inventory::set(&mut c, Resource::Flour, 1.2);
     inventory::set(&mut c, Resource::Tools, TOOL_CONSUMPTION);
+    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
     let mut inv = inventory::empty_vec();
     inventory::set(&mut inv, Resource::Flour, 15.0);
     inventory::set(&mut inv, Resource::Tools, 5.0);
+    inventory::set(&mut inv, Resource::Planks, 3.0);
     agents.push(Agent {
         id: 0,
         name: "Farmer",
@@ -306,12 +328,16 @@ pub fn create_agents() -> Vec<Agent> {
         is_merchant: false,
     });
 
-    // 1: Miller - grain -> flour, consumes flour (food)
+    // 1: Miller - grain -> flour, consumes flour (food) + tools + planks
     let mut c = inventory::empty_vec();
     inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
+    inventory::set(&mut c, Resource::Tools, 0.3);
+    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
     let mut inv = inventory::empty_vec();
     inventory::set(&mut inv, Resource::Grain, 20.0);
     inventory::set(&mut inv, Resource::Flour, 15.0);
+    inventory::set(&mut inv, Resource::Tools, 3.0);
+    inventory::set(&mut inv, Resource::Planks, 3.0);
     agents.push(Agent {
         id: 1,
         name: "Miller",
@@ -322,13 +348,15 @@ pub fn create_agents() -> Vec<Agent> {
         is_merchant: false,
     });
 
-    // 2: Lumberjack - produces timber, consumes flour + tools
+    // 2: Lumberjack - produces timber, consumes flour + tools + planks
     let mut c = inventory::empty_vec();
-    inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
+    inventory::set(&mut c, Resource::Flour, 1.2);
     inventory::set(&mut c, Resource::Tools, TOOL_CONSUMPTION);
+    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
     let mut inv = inventory::empty_vec();
     inventory::set(&mut inv, Resource::Flour, 15.0);
     inventory::set(&mut inv, Resource::Tools, 5.0);
+    inventory::set(&mut inv, Resource::Planks, 3.0);
     agents.push(Agent {
         id: 2,
         name: "Lumberjack",
@@ -339,12 +367,14 @@ pub fn create_agents() -> Vec<Agent> {
         is_merchant: false,
     });
 
-    // 3: Sawmill - timber -> planks, consumes flour
+    // 3: Sawmill - timber -> planks, consumes flour + tools
     let mut c = inventory::empty_vec();
     inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
+    inventory::set(&mut c, Resource::Tools, 0.3);
     let mut inv = inventory::empty_vec();
     inventory::set(&mut inv, Resource::Flour, 15.0);
     inventory::set(&mut inv, Resource::Timber, 15.0);
+    inventory::set(&mut inv, Resource::Tools, 3.0);
     agents.push(Agent {
         id: 3,
         name: "Sawmill",
@@ -355,13 +385,15 @@ pub fn create_agents() -> Vec<Agent> {
         is_merchant: false,
     });
 
-    // 4: Miner - produces iron ore, consumes flour + tools
+    // 4: Miner - produces iron ore, consumes flour + tools + planks
     let mut c = inventory::empty_vec();
-    inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
+    inventory::set(&mut c, Resource::Flour, 1.2);
     inventory::set(&mut c, Resource::Tools, TOOL_CONSUMPTION);
+    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
     let mut inv = inventory::empty_vec();
     inventory::set(&mut inv, Resource::Flour, 15.0);
     inventory::set(&mut inv, Resource::Tools, 5.0);
+    inventory::set(&mut inv, Resource::Planks, 3.0);
     agents.push(Agent {
         id: 4,
         name: "Miner",
@@ -372,13 +404,17 @@ pub fn create_agents() -> Vec<Agent> {
         is_merchant: false,
     });
 
-    // 5: Smelter - iron ore + timber -> iron ingots, consumes flour
+    // 5: Smelter - iron ore + timber -> iron ingots, consumes flour + tools + planks
     let mut c = inventory::empty_vec();
     inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
+    inventory::set(&mut c, Resource::Tools, 0.3);
+    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
     let mut inv = inventory::empty_vec();
     inventory::set(&mut inv, Resource::Flour, 15.0);
     inventory::set(&mut inv, Resource::IronOre, 10.0);
     inventory::set(&mut inv, Resource::Timber, 5.0);
+    inventory::set(&mut inv, Resource::Tools, 3.0);
+    inventory::set(&mut inv, Resource::Planks, 3.0);
     agents.push(Agent {
         id: 5,
         name: "Smelter",
@@ -389,9 +425,10 @@ pub fn create_agents() -> Vec<Agent> {
         is_merchant: false,
     });
 
-    // 6: Blacksmith - iron ingots + planks -> tools, consumes flour
+    // 6: Blacksmith - iron ingots + planks -> tools, consumes flour + planks
     let mut c = inventory::empty_vec();
     inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
+    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
     let mut inv = inventory::empty_vec();
     inventory::set(&mut inv, Resource::Flour, 15.0);
     inventory::set(&mut inv, Resource::IronIngots, 5.0);
@@ -406,11 +443,13 @@ pub fn create_agents() -> Vec<Agent> {
         is_merchant: false,
     });
 
-    // 7: Merchant - buys low sells high, consumes flour
+    // 7: Merchant - buys low sells high, consumes flour + planks
     let mut c = inventory::empty_vec();
     inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
+    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
     let mut inv = inventory::empty_vec();
     inventory::set(&mut inv, Resource::Flour, 20.0);
+    inventory::set(&mut inv, Resource::Planks, 3.0);
     agents.push(Agent {
         id: 7,
         name: "Merchant",

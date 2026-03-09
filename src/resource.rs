@@ -57,7 +57,7 @@ pub fn all_recipes() -> Vec<Recipe> {
         // Lumberjack: produces timber from nothing (primary resource)
         Recipe {
             output: Resource::Timber,
-            output_qty: 4.0,
+            output_qty: 3.0,
             inputs: &[],
         },
         // Miner: produces iron ore from nothing (primary resource)
@@ -75,20 +75,20 @@ pub fn all_recipes() -> Vec<Recipe> {
         // Sawmill: timber -> planks (processing adds value)
         Recipe {
             output: Resource::Planks,
-            output_qty: 4.0,
+            output_qty: 5.0,
             inputs: &[(Resource::Timber, 2.0)],
         },
         // Smelter: iron ore + timber -> iron ingots
         Recipe {
             output: Resource::IronIngots,
-            output_qty: 2.0,
+            output_qty: 3.0,
             inputs: &[(Resource::IronOre, 2.0), (Resource::Timber, 1.0)],
         },
         // Blacksmith: iron ingots + planks -> tools
         Recipe {
             output: Resource::Tools,
             output_qty: 2.0,
-            inputs: &[(Resource::IronIngots, 1.0), (Resource::Planks, 2.0)],
+            inputs: &[(Resource::IronIngots, 1.0), (Resource::Planks, 1.0)],
         },
     ]
 }

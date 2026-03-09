@@ -59,8 +59,8 @@ impl OrderBook {
                 break;
             }
 
-            // Trade at ask price (seller's limit)
-            let trade_price = best_ask;
+            // Trade at midpoint (both sides influence price)
+            let trade_price = (best_bid + best_ask) / 2.0;
             let trade_qty = self.bids[0].quantity.min(self.asks[0].quantity);
 
             trades.push(Trade {
