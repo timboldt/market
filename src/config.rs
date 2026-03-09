@@ -10,23 +10,19 @@ pub const SELL_PRICE_LOW: f32 = 0.85; // sell factor when inventory is full
 pub const BUY_PRICE_HIGH: f32 = 1.15; // buy factor when desperate (0 ticks supply)
 pub const BUY_PRICE_LOW: f32 = 0.85; // buy factor when well-stocked
 
-pub const SURPLUS_THRESHOLD: f32 = 12.0;
-pub const COMFORT_BUFFER_TICKS: f32 = 3.0;
+pub const SURPLUS_THRESHOLD: f32 = 18.0;
+pub const COMFORT_BUFFER_TICKS: f32 = 4.0;
 
-pub const MAX_PRICE: f32 = 100.0;
-
-// Merchant behavior
-pub const MERCHANT_BUY_DISCOUNT: f32 = 0.80;
-pub const MERCHANT_SELL_PREMIUM: f32 = 1.05;
+pub const MAX_PRICE: f32 = 200.0;
 
 // Consumption per tick (flour is the food everyone eats)
 pub const FLOUR_CONSUMPTION: f32 = 1.0;
-pub const TOOL_CONSUMPTION: f32 = 0.4;
-pub const PLANK_CONSUMPTION: f32 = 0.3;
+pub const TOOL_CONSUMPTION: f32 = 0.2;
+pub const PLANK_CONSUMPTION: f32 = 0.1;
 
 // Target inventory
-pub const TARGET_INVENTORY_TICKS: f32 = 10.0;
-pub const INPUT_TARGET_TICKS: f32 = 8.0;
+pub const TARGET_INVENTORY_TICKS: f32 = 15.0;
+pub const INPUT_TARGET_TICKS: f32 = 12.0;
 
 // Price memory
 pub const PRICE_EMA_ALPHA: f32 = 0.3;
@@ -35,7 +31,5 @@ pub const PRICE_EMA_ALPHA: f32 = 0.3;
 pub const MIN_ORDER_QTY: f32 = 0.1;
 pub const MIN_PRICE: f32 = 0.5;
 
-// Gold subsidy: agents below this threshold get a small income each tick
-// (represents off-screen economic activity)
-pub const POVERTY_THRESHOLD: f32 = 20.0;
-pub const POVERTY_SUBSIDY: f32 = 3.0;
+// Poverty threshold for foraging (subsistence)
+pub const POVERTY_THRESHOLD: f32 = 25.0;

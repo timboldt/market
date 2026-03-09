@@ -13,24 +13,42 @@ pub struct Agent {
     pub recipes: Vec<usize>,
     pub consumption: ResourceVec,
     pub is_merchant: bool,
+    pub efficiency: f32, // 0.0 to 1.0, affects production
 }
 
 impl Agent {
     pub fn produce(&mut self, recipes: &[Recipe]) {
+        // Efficiency check: if we lack tools, we are less efficient (for primary producers)
+        let tool_efficiency = if self.recipes.iter().any(|&ri| recipes[ri].inputs.is_empty()) {
+            let tools = inventory::get(&self.inventory, Resource::Tools);
+            if tools < 0.1 {
+                0.2 // basic hand tools/manual labor
+            } else {
+                1.0
+            }
+        } else {
+            1.0
+        };
+
+        let current_efficiency = self.efficiency * tool_efficiency;
+
         for &ri in &self.recipes {
             let recipe = &recipes[ri];
+            let actual_output_qty = recipe.output_qty * current_efficiency;
+
+            // Surplus threshold: use base output_qty for the cap to avoid stalling when inefficient
+            let output_cap = recipe.output_qty * SURPLUS_THRESHOLD;
+
             if recipe.inputs.is_empty() {
                 // Primary production: cap output if surplus is too high
                 let have = inventory::get(&self.inventory, recipe.output);
-                let cap = recipe.output_qty * SURPLUS_THRESHOLD;
-                if have < cap {
-                    inventory::add(&mut self.inventory, recipe.output, recipe.output_qty);
+                if have < output_cap {
+                    inventory::add(&mut self.inventory, recipe.output, actual_output_qty);
                 }
                 continue;
             }
             // Don't produce if output inventory is already high
             let output_have = inventory::get(&self.inventory, recipe.output);
-            let output_cap = recipe.output_qty * SURPLUS_THRESHOLD;
             if output_have >= output_cap {
                 continue;
             }
@@ -41,7 +59,7 @@ impl Agent {
                 max_runs = max_runs.min((available / qty).floor());
             }
             // Cap runs so output doesn't exceed surplus threshold
-            let room = (output_cap - output_have) / recipe.output_qty;
+            let room = (output_cap - output_have) / actual_output_qty;
             max_runs = max_runs.min(room.floor().max(0.0));
             if max_runs < 1.0 {
                 continue;
@@ -52,18 +70,36 @@ impl Agent {
             inventory::add(
                 &mut self.inventory,
                 recipe.output,
-                recipe.output_qty * max_runs,
+                actual_output_qty * max_runs,
             );
         }
     }
 
     pub fn consume(&mut self) {
+        let mut flour_actual = 0.0;
+        let mut flour_need = 0.0;
+
         for r in Resource::iter() {
             let need = inventory::get(&self.consumption, r);
             if need > 0.0 {
                 let have = inventory::get(&self.inventory, r);
                 let actual = have.min(need);
                 inventory::sub(&mut self.inventory, r, actual);
+
+                if r == Resource::Flour {
+                    flour_actual = actual;
+                    flour_need = need;
+                }
+            }
+        }
+
+        // Efficiency recovery/decay: food (Flour) is the primary driver
+        if flour_need > 0.0 {
+            let ratio = (flour_actual / flour_need).min(1.0);
+            if ratio > 0.8 {
+                self.efficiency = (self.efficiency + 0.05).min(1.0);
+            } else if ratio < 0.3 {
+                self.efficiency = (self.efficiency - 0.05).max(0.1);
             }
         }
     }
@@ -158,9 +194,9 @@ pub fn generate_orders_with_context(
                 0.5
             };
             let sell_factor = SELL_PRICE_HIGH - (SELL_PRICE_HIGH - SELL_PRICE_LOW) * fullness;
-            // Cost floor: intermediaries never sell below input cost + 30% margin
+            // Cost floor: intermediaries never sell below input cost + 10% margin
             let cost_floor = if prod_rate > 0.0 {
-                (total_input_cost / prod_rate) * 1.3
+                (total_input_cost / prod_rate) * 1.1
             } else {
                 0.0
             };
@@ -234,7 +270,16 @@ pub fn generate_orders_with_context(
         if deficit > MIN_ORDER_QTY && budget > 1.0 {
             // Dynamic buy pricing: higher urgency when supply is low
             let urgency = (1.0 - ticks_supply / (TARGET_INVENTORY_TICKS * 2.0)).clamp(0.0, 1.0);
-            let buy_factor = BUY_PRICE_LOW + (BUY_PRICE_HIGH - BUY_PRICE_LOW) * urgency;
+
+            // Wealth effect: rich agents are less price-sensitive for food/necessities
+            let wealth_factor = if agent.gold > STARTING_GOLD * 2.0 {
+                1.1 // willing to pay 10% more
+            } else {
+                1.0
+            };
+
+            let buy_factor =
+                (BUY_PRICE_LOW + (BUY_PRICE_HIGH - BUY_PRICE_LOW) * urgency) * wealth_factor;
             let buy_price = (price * buy_factor).max(MIN_PRICE);
             let max_qty = budget / buy_price;
             let qty = deficit.min(max_qty);
@@ -268,11 +313,11 @@ fn merchant_orders(
         let have = inventory::get(&agent.inventory, r);
         let price = inventory::get(last_prices, r);
 
-        // Sell above market (keep some flour for food)
+        // Sell with a tighter spread to increase volume
         let reserve = if r == Resource::Flour { 5.0 } else { 0.0 };
         let sellable = have - reserve;
         if sellable > MIN_ORDER_QTY {
-            let sell_price = (price * MERCHANT_SELL_PREMIUM).max(MIN_PRICE);
+            let sell_price = (price * 1.02).max(MIN_PRICE);
             orders.push(Order {
                 id: *next_order_id,
                 agent_id: agent.id,
@@ -284,10 +329,15 @@ fn merchant_orders(
             *next_order_id += 1;
         }
 
-        // Buy below market
+        // Buy at market price if inventory is low, otherwise discount
         if budget > 1.0 {
-            let buy_price = (price * MERCHANT_BUY_DISCOUNT).max(MIN_PRICE);
-            let max_qty = (budget * 0.08) / buy_price;
+            let buy_price = if have < 5.0 {
+                price * 0.95
+            } else {
+                price * 0.85
+            };
+            let buy_price = buy_price.max(MIN_PRICE);
+            let max_qty = (budget * 0.1) / buy_price; // use 10% of budget per resource
             if max_qty > MIN_ORDER_QTY {
                 budget -= max_qty * buy_price;
                 orders.push(Order {
@@ -326,6 +376,7 @@ pub fn create_agents() -> Vec<Agent> {
         recipes: vec![0],
         consumption: c,
         is_merchant: false,
+        efficiency: 1.0,
     });
 
     // 1: Miller - grain -> flour, consumes flour (food) + tools + planks
@@ -346,6 +397,7 @@ pub fn create_agents() -> Vec<Agent> {
         recipes: vec![3],
         consumption: c,
         is_merchant: false,
+        efficiency: 1.0,
     });
 
     // 2: Lumberjack - produces timber, consumes flour + tools + planks
@@ -365,6 +417,7 @@ pub fn create_agents() -> Vec<Agent> {
         recipes: vec![1],
         consumption: c,
         is_merchant: false,
+        efficiency: 1.0,
     });
 
     // 3: Sawmill - timber -> planks, consumes flour + tools
@@ -383,6 +436,7 @@ pub fn create_agents() -> Vec<Agent> {
         recipes: vec![4],
         consumption: c,
         is_merchant: false,
+        efficiency: 1.0,
     });
 
     // 4: Miner - produces iron ore, consumes flour + tools + planks
@@ -402,6 +456,7 @@ pub fn create_agents() -> Vec<Agent> {
         recipes: vec![2],
         consumption: c,
         is_merchant: false,
+        efficiency: 1.0,
     });
 
     // 5: Smelter - iron ore + timber -> iron ingots, consumes flour + tools + planks
@@ -423,6 +478,7 @@ pub fn create_agents() -> Vec<Agent> {
         recipes: vec![5],
         consumption: c,
         is_merchant: false,
+        efficiency: 1.0,
     });
 
     // 6: Blacksmith - iron ingots + planks -> tools, consumes flour + planks
@@ -441,6 +497,7 @@ pub fn create_agents() -> Vec<Agent> {
         recipes: vec![6],
         consumption: c,
         is_merchant: false,
+        efficiency: 1.0,
     });
 
     // 7: Merchant - buys low sells high, consumes flour + planks
@@ -458,6 +515,7 @@ pub fn create_agents() -> Vec<Agent> {
         recipes: vec![],
         consumption: c,
         is_merchant: true,
+        efficiency: 1.0,
     });
 
     agents

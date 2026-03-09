@@ -39,7 +39,10 @@ pub fn print_tick(tick: u64, market: &Market, agents: &[Agent]) {
 fn print_agent_summary(agents: &[Agent]) {
     println!("  Agents:");
     for agent in agents {
-        print!("    {:>10} gold:{:>6.1} |", agent.name, agent.gold);
+        print!(
+            "    {:>10} gold:{:>6.1} eff:{:>3.1} |",
+            agent.name, agent.gold, agent.efficiency
+        );
         for r in Resource::iter() {
             let qty = crate::inventory::get(&agent.inventory, r);
             if qty > 0.01 {

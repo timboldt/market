@@ -51,10 +51,15 @@ pub fn tick(
         agent.consume();
     }
 
-    // 6. Poverty subsidy (prevents total economic collapse)
+    // 6. Subsistence foraging (prevents total economic collapse)
+    // If an agent is very poor and has no food, they can forage for a tiny amount of basic resources.
     for agent in agents.iter_mut() {
         if agent.gold < crate::config::POVERTY_THRESHOLD {
-            agent.gold += crate::config::POVERTY_SUBSIDY;
+            let flour_have =
+                crate::inventory::get(&agent.inventory, crate::resource::Resource::Flour);
+            if flour_have < 1.0 {
+                crate::inventory::add(&mut agent.inventory, crate::resource::Resource::Flour, 0.5);
+            }
         }
     }
 }
