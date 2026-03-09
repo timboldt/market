@@ -508,21 +508,21 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
 
             // Initial role-specific inventory
             if role_idx == 3 {
-                inventory::set(&mut inv, Resource::Grain, 20.0);
+                inventory::set(&mut inv, Resource::Grain, 10.0);
             }
             if role_idx == 4 {
-                inventory::set(&mut inv, Resource::Timber, 15.0);
+                inventory::set(&mut inv, Resource::Timber, 8.0);
             }
             if role_idx == 5 {
-                inventory::set(&mut inv, Resource::IronOre, 10.0);
-                inventory::set(&mut inv, Resource::Timber, 5.0);
+                inventory::set(&mut inv, Resource::IronOre, 6.0);
+                inventory::set(&mut inv, Resource::Timber, 4.0);
             }
             if role_idx == 6 {
-                inventory::set(&mut inv, Resource::IronIngots, 5.0);
-                inventory::set(&mut inv, Resource::Planks, 5.0);
+                inventory::set(&mut inv, Resource::IronIngots, 4.0);
+                inventory::set(&mut inv, Resource::Planks, 4.0);
             }
             if role_idx == 8 {
-                inventory::set(&mut inv, Resource::Wool, 15.0);
+                inventory::set(&mut inv, Resource::Wool, 8.0);
             }
 
             agents.push(Agent {

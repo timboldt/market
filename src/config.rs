@@ -23,8 +23,8 @@ pub const PLANK_CONSUMPTION: f32 = 0.2;
 pub const CLOTH_CONSUMPTION: f32 = 0.2;
 
 // Target inventory
-pub const TARGET_INVENTORY_TICKS: f32 = 8.0;
-pub const INPUT_TARGET_TICKS: f32 = 6.0;
+pub const TARGET_INVENTORY_TICKS: f32 = 4.0;
+pub const INPUT_TARGET_TICKS: f32 = 3.0;
 
 // Price memory
 pub const PRICE_EMA_ALPHA: f32 = 0.15;
