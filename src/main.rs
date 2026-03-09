@@ -1,4 +1,5 @@
 mod agent;
+mod charts;
 mod config;
 mod display;
 mod inventory;
@@ -27,6 +28,10 @@ struct Args {
     /// Milliseconds per tick
     #[arg(long, default_value_t = 500)]
     speed: u64,
+
+    /// Generate PNG charts after simulation
+    #[arg(long)]
+    graph: bool,
 }
 
 fn main() {
@@ -36,6 +41,7 @@ fn main() {
     let mut agents = agent::create_agents(args.seed);
     let mut market = market::Market::new();
     let mut next_order_id: u64 = 0;
+    let mut history = charts::SimHistory::new();
 
     display::print_header();
 
@@ -45,6 +51,10 @@ fn main() {
 
         simulation::tick(tick, &mut agents, &mut market, &recipes, &mut next_order_id);
         display::print_tick(tick, &market, &agents);
+
+        if args.graph {
+            history.record_tick(&market, &agents, &recipes);
+        }
 
         if args.ticks > 0 && tick >= args.ticks {
             break;
@@ -56,4 +66,9 @@ fn main() {
     }
 
     println!("\nSimulation complete after {} ticks.", tick);
+
+    if args.graph {
+        println!("\nGenerating charts...");
+        history.generate_charts(&recipes);
+    }
 }

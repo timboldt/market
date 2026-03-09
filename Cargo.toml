@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+plotters = "0.3.7"
 rand = "0.8"
 strum = "0.26"
 strum_macros = "0.26"
