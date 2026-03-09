@@ -10,7 +10,7 @@ pub fn print_header() {
         print!(" {:>6}", r.short_name());
     }
     println!(" | Trades");
-    println!("{}", "-".repeat(100));
+    println!("{}", "-".repeat(107));
 }
 
 pub fn print_tick(tick: u64, market: &Market, agents: &[Agent]) {

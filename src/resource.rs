@@ -14,6 +14,7 @@ pub enum Resource {
     Planks = 8,
     IronIngots = 9,
     Tools = 10,
+    Cloth = 11,
 }
 
 impl Resource {
@@ -30,6 +31,7 @@ impl Resource {
             Resource::Planks => "Plank",
             Resource::IronIngots => "Ingot",
             Resource::Tools => "Tools",
+            Resource::Cloth => "Cloth",
         }
     }
 }
@@ -89,6 +91,18 @@ pub fn all_recipes() -> Vec<Recipe> {
             output: Resource::Tools,
             output_qty: 2.0,
             inputs: &[(Resource::IronIngots, 1.0), (Resource::Planks, 1.0)],
+        },
+        // Shepherd: produces wool from nothing (primary resource)
+        Recipe {
+            output: Resource::Wool,
+            output_qty: 3.0,
+            inputs: &[],
+        },
+        // Weaver: wool -> cloth (processing adds value)
+        Recipe {
+            output: Resource::Cloth,
+            output_qty: 3.0,
+            inputs: &[(Resource::Wool, 2.0)],
         },
     ]
 }

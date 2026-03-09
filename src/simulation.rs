@@ -106,6 +106,17 @@ fn reallocate_labor(tick_num: u64, agents: &mut [Agent], market: &Market, recipe
 
     let role_counts = compute_role_counts(agents);
 
+    // Compute average inventory per role (measures unsold stockpile pressure)
+    let mut role_inventory_totals = [0.0f32; RECIPE_COUNT];
+    for agent in agents.iter() {
+        if let Some(ri) = agent.role_index {
+            if ri < RECIPE_COUNT {
+                let output = recipes[ri].output;
+                role_inventory_totals[ri] += crate::inventory::get(&agent.inventory, output);
+            }
+        }
+    }
+
     // 1. Calculate potential profit for each recipe
     let mut profits = Vec::new();
     for (i, recipe) in recipes.iter().enumerate() {
@@ -116,17 +127,36 @@ fn reallocate_labor(tick_num: u64, agents: &mut [Agent], market: &Market, recipe
         let count = role_counts[i] + 1;
         let congestion = (crate::config::ROLE_SATURATION_POINT / count as f32).min(1.0);
 
-        let revenue = recipe.output_qty * congestion * market.last_price(recipe.output);
+        // Inventory glut penalty: if existing producers can't sell, discount revenue
+        let avg_inventory = if role_counts[i] > 0 {
+            role_inventory_totals[i] / role_counts[i] as f32
+        } else {
+            0.0
+        };
+        let output_cap = recipe.output_qty * crate::config::SURPLUS_THRESHOLD;
+        let glut_factor = (1.0 - avg_inventory / output_cap).clamp(0.2, 1.0);
+
+        let revenue =
+            recipe.output_qty * congestion * glut_factor * market.last_price(recipe.output);
         let input_cost: f32 = recipe
             .inputs
             .iter()
             .map(|&(res, qty)| qty * market.last_price(res))
             .sum();
 
-        // Estimated maintenance cost (Flour + Tools/Planks)
-        let maint_cost = 1.0 * market.last_price(Resource::Flour)
-            + 0.2 * market.last_price(Resource::Tools)
-            + 0.1 * market.last_price(Resource::Planks);
+        // Estimated maintenance cost based on actual role consumption
+        let maint_cost = if recipe.inputs.is_empty() {
+            // Primary producers: higher flour + tools + planks + cloth
+            1.2 * market.last_price(Resource::Flour)
+                + 0.2 * market.last_price(Resource::Tools)
+                + 0.1 * market.last_price(Resource::Planks)
+                + 0.2 * market.last_price(Resource::Cloth)
+        } else {
+            1.0 * market.last_price(Resource::Flour)
+                + 0.3 * market.last_price(Resource::Tools)
+                + 0.1 * market.last_price(Resource::Planks)
+                + 0.2 * market.last_price(Resource::Cloth)
+        };
 
         let potential_profit = revenue - input_cost - maint_cost;
         profits.push((i, potential_profit));
@@ -140,6 +170,10 @@ fn reallocate_labor(tick_num: u64, agents: &mut [Agent], market: &Market, recipe
     profits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // 2. Individualized switching logic
+    let non_producer_count = agents.iter().filter(|a| !a.is_merchant).count() as f32;
+    let avg_per_role = non_producer_count / RECIPE_COUNT as f32;
+    let max_role_count = (avg_per_role * 1.5).ceil() as u32;
+
     let mut rng = rand::thread_rng();
     for agent in agents.iter_mut() {
         if agent.is_merchant {
@@ -159,12 +193,23 @@ fn reallocate_labor(tick_num: u64, agents: &mut [Agent], market: &Market, recipe
             .unwrap_or(0.0);
 
         // Anti-herding: pick randomly from the top N profitable roles
+        // but skip roles that are already overcrowded
         let top_n = profits.len().min(crate::config::TOP_N_ROLES);
-        let pick = rng.gen_range(0..top_n);
-        let (best_role, best_profit) = profits[pick];
+        let candidates: Vec<_> = profits[..top_n]
+            .iter()
+            .filter(|(ri, _)| role_counts[*ri] < max_role_count || *ri == current_role)
+            .copied()
+            .collect();
+
+        if candidates.is_empty() {
+            continue;
+        }
+
+        let pick = rng.gen_range(0..candidates.len());
+        let (best_role, best_profit) = candidates[pick];
 
         // Profit threshold based on ambition: ambitious agents switch for less
-        let switch_threshold = 1.3 * agent.personality.ambition;
+        let switch_threshold = 1.5 * agent.personality.ambition;
 
         if best_profit > current_profit * switch_threshold
             && best_profit > crate::config::MIN_PROFIT_THRESHOLD

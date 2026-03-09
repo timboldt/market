@@ -40,12 +40,25 @@ impl Market {
             book.clear();
         }
 
+        // Track which resources had trades
+        let mut traded = [false; RESOURCE_COUNT];
+
         // Update last prices with EMA from actual trade prices
         for trade in &self.trades_this_tick {
             let idx = trade.resource as usize;
             debug_assert!(idx < RESOURCE_COUNT);
+            traded[idx] = true;
             let old = self.last_prices[idx];
             self.last_prices[idx] = old * (1.0 - PRICE_EMA_ALPHA) + trade.price * PRICE_EMA_ALPHA;
+        }
+
+        // Decay prices toward DEFAULT_PRICE when no trades occur
+        for (idx, had_trade) in traded.iter().enumerate() {
+            if !had_trade {
+                let old = self.last_prices[idx];
+                self.last_prices[idx] =
+                    old * (1.0 - PRICE_EMA_ALPHA * 0.5) + DEFAULT_PRICE * PRICE_EMA_ALPHA * 0.5;
+            }
         }
 
         // Clamp prices to valid range

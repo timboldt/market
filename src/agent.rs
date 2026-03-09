@@ -49,6 +49,8 @@ impl Agent {
             Resource::Planks => "Sawyer",
             Resource::IronIngots => "Smelter",
             Resource::Tools => "Smith",
+            Resource::Wool => "Shepherd",
+            Resource::Cloth => "Weaver",
             _ => "Worker",
         };
 
@@ -59,15 +61,22 @@ impl Agent {
             inventory::set(&mut self.consumption, Resource::Flour, 1.2);
             inventory::set(&mut self.consumption, Resource::Tools, TOOL_CONSUMPTION);
             inventory::set(&mut self.consumption, Resource::Planks, PLANK_CONSUMPTION);
+            inventory::set(&mut self.consumption, Resource::Cloth, CLOTH_CONSUMPTION);
         } else if recipe.output == Resource::Tools {
-            // Blacksmith: flour + planks
+            // Blacksmith: flour + planks + cloth
             inventory::set(&mut self.consumption, Resource::Flour, FLOUR_CONSUMPTION);
             inventory::set(&mut self.consumption, Resource::Planks, PLANK_CONSUMPTION);
+            inventory::set(&mut self.consumption, Resource::Cloth, CLOTH_CONSUMPTION);
+        } else if recipe.output == Resource::Cloth {
+            // Weaver: flour + tools (uses own cloth)
+            inventory::set(&mut self.consumption, Resource::Flour, FLOUR_CONSUMPTION);
+            inventory::set(&mut self.consumption, Resource::Tools, 0.3);
         } else {
-            // Other intermediaries: flour + tools + planks
+            // Other intermediaries: flour + tools + planks + cloth
             inventory::set(&mut self.consumption, Resource::Flour, FLOUR_CONSUMPTION);
             inventory::set(&mut self.consumption, Resource::Tools, 0.3);
             inventory::set(&mut self.consumption, Resource::Planks, PLANK_CONSUMPTION);
+            inventory::set(&mut self.consumption, Resource::Cloth, CLOTH_CONSUMPTION);
         }
 
         // Learning penalty: switching roles drops efficiency
@@ -387,7 +396,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
     let mut agents = Vec::new();
     let mut id = 0;
 
-    // Define role counts
+    // Define role counts (~30 agents total)
     let roles = vec![
         (
             "Farmer",
@@ -397,8 +406,9 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Flour, 1.2),
                 (Resource::Tools, TOOL_CONSUMPTION),
                 (Resource::Planks, PLANK_CONSUMPTION),
+                (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            4,
+            5,
         ),
         (
             "Miller",
@@ -408,8 +418,9 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Flour, FLOUR_CONSUMPTION),
                 (Resource::Tools, 0.3),
                 (Resource::Planks, PLANK_CONSUMPTION),
+                (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            3,
+            4,
         ),
         (
             "Lumber",
@@ -419,14 +430,19 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Flour, 1.2),
                 (Resource::Tools, TOOL_CONSUMPTION),
                 (Resource::Planks, PLANK_CONSUMPTION),
+                (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            3,
+            4,
         ),
         (
             "Sawyer",
             4,
             vec![4],
-            vec![(Resource::Flour, FLOUR_CONSUMPTION), (Resource::Tools, 0.3)],
+            vec![
+                (Resource::Flour, FLOUR_CONSUMPTION),
+                (Resource::Tools, 0.3),
+                (Resource::Cloth, CLOTH_CONSUMPTION),
+            ],
             2,
         ),
         (
@@ -437,6 +453,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Flour, 1.2),
                 (Resource::Tools, TOOL_CONSUMPTION),
                 (Resource::Planks, PLANK_CONSUMPTION),
+                (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
             3,
         ),
@@ -448,6 +465,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Flour, FLOUR_CONSUMPTION),
                 (Resource::Tools, 0.3),
                 (Resource::Planks, PLANK_CONSUMPTION),
+                (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
             2,
         ),
@@ -458,7 +476,27 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
             vec![
                 (Resource::Flour, FLOUR_CONSUMPTION),
                 (Resource::Planks, PLANK_CONSUMPTION),
+                (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
+            3,
+        ),
+        (
+            "Shepherd",
+            7,
+            vec![7],
+            vec![
+                (Resource::Flour, 1.2),
+                (Resource::Tools, TOOL_CONSUMPTION),
+                (Resource::Planks, PLANK_CONSUMPTION),
+                (Resource::Cloth, CLOTH_CONSUMPTION),
+            ],
+            3,
+        ),
+        (
+            "Weaver",
+            8,
+            vec![8],
+            vec![(Resource::Flour, FLOUR_CONSUMPTION), (Resource::Tools, 0.3)],
             2,
         ),
     ];
@@ -471,9 +509,10 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
             }
 
             let mut inv = inventory::empty_vec();
-            // Start with some basic food and tools
+            // Start with some basic food, tools, and cloth
             inventory::set(&mut inv, Resource::Flour, rng.gen_range(10.0..20.0));
             inventory::set(&mut inv, Resource::Tools, rng.gen_range(2.0..5.0));
+            inventory::set(&mut inv, Resource::Cloth, rng.gen_range(2.0..4.0));
 
             // Initial role-specific inventory
             if role_idx == 3 {
@@ -489,6 +528,9 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
             if role_idx == 6 {
                 inventory::set(&mut inv, Resource::IronIngots, 5.0);
                 inventory::set(&mut inv, Resource::Planks, 5.0);
+            }
+            if role_idx == 8 {
+                inventory::set(&mut inv, Resource::Wool, 15.0);
             }
 
             agents.push(Agent {
@@ -514,9 +556,11 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
     let mut c = inventory::empty_vec();
     inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
     inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
+    inventory::set(&mut c, Resource::Cloth, CLOTH_CONSUMPTION);
     let mut inv = inventory::empty_vec();
     inventory::set(&mut inv, Resource::Flour, 20.0);
     inventory::set(&mut inv, Resource::Planks, 3.0);
+    inventory::set(&mut inv, Resource::Cloth, 3.0);
     agents.push(Agent {
         id,
         name: "Merchant",
