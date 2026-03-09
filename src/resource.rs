@@ -40,8 +40,9 @@ impl Resource {
     pub fn spoilage_rate(&self) -> f32 {
         use crate::config::*;
         match self {
-            Resource::Grain | Resource::Flour | Resource::Herbs => SPOILAGE_PERISHABLE,
-            Resource::Timber
+            Resource::Flour | Resource::Herbs => SPOILAGE_PERISHABLE,
+            Resource::Grain
+            | Resource::Timber
             | Resource::Wool
             | Resource::Clay
             | Resource::IronOre
@@ -70,7 +71,7 @@ pub fn all_recipes() -> Vec<Recipe> {
         // Farmer: produces grain from nothing (primary resource)
         Recipe {
             output: Resource::Grain,
-            output_qty: 2.5,
+            output_qty: 3.0,
             inputs: &[],
         },
         // Lumberjack: produces timber from nothing (primary resource)

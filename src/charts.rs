@@ -12,6 +12,7 @@ pub const OUTPUT_DIR: &str = "output";
 pub struct SimHistory {
     pub prices: Vec<[f32; crate::config::RESOURCE_COUNT]>,
     pub trade_counts: Vec<usize>,
+    pub resource_volumes: Vec<[f32; crate::config::RESOURCE_COUNT]>,
     pub role_counts: Vec<[u32; crate::config::RECIPE_COUNT]>,
     pub agent_golds: Vec<Vec<f32>>,
 }
@@ -34,8 +35,13 @@ impl SimHistory {
         }
         self.prices.push(prices);
 
-        // Trade count
+        // Trade count (total and per-resource volume)
         self.trade_counts.push(market.trade_count());
+        let mut volumes = [0.0f32; crate::config::RESOURCE_COUNT];
+        for trade in &market.trades_this_tick {
+            volumes[trade.resource as usize] += trade.quantity;
+        }
+        self.resource_volumes.push(volumes);
 
         // Role counts
         let mut counts = [0u32; crate::config::RECIPE_COUNT];
@@ -61,8 +67,8 @@ impl SimHistory {
 
         std::fs::create_dir_all(OUTPUT_DIR).expect("Failed to create output directory");
 
-        self.draw_price_chart().unwrap_or_else(|e| {
-            eprintln!("Error drawing price chart: {}", e);
+        self.draw_resource_charts().unwrap_or_else(|e| {
+            eprintln!("Error drawing resource charts: {}", e);
         });
         self.draw_trade_volume_chart().unwrap_or_else(|e| {
             eprintln!("Error drawing trade volume chart: {}", e);
@@ -178,71 +184,109 @@ impl SimHistory {
         println!("  HEALTH SCORE:     {:.0}/100", health);
     }
 
-    fn draw_price_chart(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn draw_resource_charts(&self) -> Result<(), Box<dyn std::error::Error>> {
         let ticks = self.prices.len();
-        let max_price = self
-            .prices
-            .iter()
-            .flat_map(|p| p.iter())
-            .cloned()
-            .fold(0.0f32, f32::max)
-            .min(100.0); // Cap for readability
 
-        let path = Path::new(OUTPUT_DIR).join("prices.png");
-        let root = BitMapBackend::new(path.to_str().unwrap(), (1200, 600)).into_drawing_area();
-        root.fill(&WHITE)?;
+        // Skip unused resources (Stone, Clay, Herbs)
+        let active_resources: Vec<(usize, Resource, &str)> = Resource::iter()
+            .enumerate()
+            .filter_map(|(ri, r)| {
+                let name = match r {
+                    Resource::Grain => Some("grain"),
+                    Resource::Timber => Some("timber"),
+                    Resource::IronOre => Some("iron_ore"),
+                    Resource::Wool => Some("wool"),
+                    Resource::Flour => Some("flour"),
+                    Resource::Planks => Some("planks"),
+                    Resource::IronIngots => Some("ingots"),
+                    Resource::Tools => Some("tools"),
+                    Resource::Cloth => Some("cloth"),
+                    _ => None,
+                };
+                name.map(|n| (ri, r, n))
+            })
+            .collect();
 
-        let mut chart = ChartBuilder::on(&root)
-            .caption("Resource Prices Over Time", ("sans-serif", 24))
-            .margin(10)
-            .x_label_area_size(30)
-            .y_label_area_size(50)
-            .build_cartesian_2d(0..ticks, 0.0f32..max_price * 1.1)?;
+        let resources_dir = Path::new(OUTPUT_DIR).join("resources");
+        std::fs::create_dir_all(&resources_dir)?;
 
-        chart
-            .configure_mesh()
-            .x_desc("Tick")
-            .y_desc("Price")
-            .draw()?;
+        for &(ri, r, filename) in &active_resources {
+            let max_price = self
+                .prices
+                .iter()
+                .map(|p| p[ri])
+                .fold(0.0f32, f32::max)
+                .max(1.0);
+            let max_volume = self
+                .resource_volumes
+                .iter()
+                .map(|v| v[ri])
+                .fold(0.0f32, f32::max)
+                .max(1.0);
 
-        let colors = [
-            &RED,
-            &BLUE,
-            &GREEN,
-            &MAGENTA,
-            &CYAN,
-            &BLACK,
-            &RGBColor(255, 165, 0),  // orange
-            &RGBColor(128, 0, 128),  // purple
-            &RGBColor(0, 128, 128),  // teal
-            &RGBColor(139, 69, 19),  // brown
-            &RGBColor(70, 130, 180), // steel blue
-            &RGBColor(220, 20, 60),  // crimson
-        ];
+            let path = resources_dir.join(format!("{}.png", filename));
+            let root = BitMapBackend::new(path.to_str().unwrap(), (900, 500)).into_drawing_area();
+            root.fill(&WHITE)?;
 
-        for (ri, r) in Resource::iter().enumerate() {
-            let data: Vec<(usize, f32)> = (0..ticks)
-                .map(|t| (t, self.prices[t][ri].min(max_price)))
-                .collect();
+            // Split: price on top (70%), volume on bottom (30%)
+            let (upper, lower) = root.split_vertically(350);
 
-            let color = colors[ri % colors.len()];
-            chart
-                .draw_series(LineSeries::new(data, color.stroke_width(2)))?
-                .label(format!("{:?}", r))
-                .legend(move |(x, y)| {
-                    PathElement::new(vec![(x, y), (x + 20, y)], color.stroke_width(2))
-                });
+            // Price chart
+            {
+                let mut chart = ChartBuilder::on(&upper)
+                    .caption(
+                        format!("{:?}", r),
+                        ("sans-serif", 22).into_font().color(&BLACK),
+                    )
+                    .margin(8)
+                    .margin_bottom(0)
+                    .x_label_area_size(25)
+                    .y_label_area_size(55)
+                    .build_cartesian_2d(0..ticks, 0.0f32..max_price * 1.05)?;
+
+                chart.configure_mesh().y_desc("Price").x_labels(10).draw()?;
+
+                chart.draw_series(LineSeries::new(
+                    (0..ticks).map(|t| (t, self.prices[t][ri])),
+                    BLUE.stroke_width(2),
+                ))?;
+            }
+
+            // Volume chart
+            {
+                let mut chart = ChartBuilder::on(&lower)
+                    .margin(8)
+                    .margin_top(0)
+                    .x_label_area_size(25)
+                    .y_label_area_size(55)
+                    .build_cartesian_2d(0..ticks, 0.0f32..max_volume * 1.1)?;
+
+                chart
+                    .configure_mesh()
+                    .y_desc("Volume")
+                    .x_desc("Tick")
+                    .x_labels(10)
+                    .draw()?;
+
+                chart.draw_series((0..ticks).map(|t| {
+                    let vol = self.resource_volumes[t][ri];
+                    let x0 = t;
+                    let x1 = t + 1;
+                    Rectangle::new(
+                        [(x0, 0.0), (x1, vol)],
+                        RGBColor(100, 149, 237).mix(0.7).filled(),
+                    )
+                }))?;
+            }
+
+            root.present()?;
         }
 
-        chart
-            .configure_series_labels()
-            .position(SeriesLabelPosition::UpperRight)
-            .background_style(WHITE.mix(0.8))
-            .border_style(BLACK)
-            .draw()?;
-
-        root.present()?;
-        println!("Saved: {}/prices.png", OUTPUT_DIR);
+        println!(
+            "Saved: {}/resources/ ({} charts)",
+            OUTPUT_DIR,
+            active_resources.len()
+        );
         Ok(())
     }
 
