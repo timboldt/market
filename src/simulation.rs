@@ -178,7 +178,7 @@ fn reallocate_labor(
         let maint_cost = if recipe.inputs.is_empty() {
             // Primary producers: higher flour + tools + planks + cloth
             1.2 * market.last_price(Resource::Flour)
-                + 0.2 * market.last_price(Resource::Tools)
+                + 0.3 * market.last_price(Resource::Tools)
                 + 0.2 * market.last_price(Resource::Planks)
                 + 0.2 * market.last_price(Resource::Cloth)
         } else {

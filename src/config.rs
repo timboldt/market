@@ -14,11 +14,11 @@ pub const BUY_PRICE_LOW: f32 = 0.85; // buy factor when well-stocked
 pub const SURPLUS_THRESHOLD: f32 = 10.0;
 pub const COMFORT_BUFFER_TICKS: f32 = 2.0;
 
-pub const MAX_PRICE: f32 = 200.0;
+pub const MAX_PRICE: f32 = 500.0;
 
 // Consumption per tick (flour is the food everyone eats)
 pub const FLOUR_CONSUMPTION: f32 = 1.0;
-pub const TOOL_CONSUMPTION: f32 = 0.2;
+pub const TOOL_CONSUMPTION: f32 = 0.3;
 pub const PLANK_CONSUMPTION: f32 = 0.2;
 pub const CLOTH_CONSUMPTION: f32 = 0.2;
 
@@ -39,7 +39,7 @@ pub const MIN_ORDER_QTY: f32 = 0.1;
 pub const MIN_PRICE: f32 = 0.5;
 
 // Royal tax rate (fraction of gold collected per tick)
-pub const TAX_RATE: f32 = 0.03;
+pub const TAX_RATE: f32 = 0.05;
 
 // Congestion: roles with more than this many agents suffer diminishing returns
 pub const ROLE_SATURATION_POINT: f32 = 40.0;

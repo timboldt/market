@@ -52,12 +52,15 @@ impl Market {
             self.last_prices[idx] = old * (1.0 - PRICE_EMA_ALPHA) + trade.price * PRICE_EMA_ALPHA;
         }
 
-        // Decay prices toward DEFAULT_PRICE when no trades occur
+        // Gentle mean reversion for untouched prices — slowly pulls extreme prices
+        // back toward a midpoint, preventing them from getting permanently stuck
+        // at MAX_PRICE or MIN_PRICE when no trades occur.
+        let midpoint = (MAX_PRICE + MIN_PRICE) / 2.0;
+        let decay_rate = PRICE_EMA_ALPHA * 0.1; // Very slow: ~1.5% per tick
         for (idx, had_trade) in traded.iter().enumerate() {
             if !had_trade {
                 let old = self.last_prices[idx];
-                self.last_prices[idx] =
-                    old * (1.0 - PRICE_EMA_ALPHA * 0.5) + DEFAULT_PRICE * PRICE_EMA_ALPHA * 0.5;
+                self.last_prices[idx] = old * (1.0 - decay_rate) + midpoint * decay_rate;
             }
         }
 
