@@ -2,6 +2,7 @@ use crate::agent::{generate_orders, Agent};
 use crate::config::RECIPE_COUNT;
 use crate::market::Market;
 use crate::resource::Recipe;
+use strum::IntoEnumIterator;
 
 fn compute_role_counts(agents: &[Agent]) -> [u32; RECIPE_COUNT] {
     let mut counts = [0u32; RECIPE_COUNT];
@@ -85,22 +86,51 @@ pub fn tick(
         agent.consume();
     }
 
-    // 6. Labor Reallocation (Individualized)
-    reallocate_labor(tick_num, agents, market, recipes);
-
-    // 7. Subsistence foraging (prevents total economic collapse)
+    // 6. Spoilage: goods decay over time
     for agent in agents.iter_mut() {
-        if agent.gold < crate::config::POVERTY_THRESHOLD {
-            let flour_have =
-                crate::inventory::get(&agent.inventory, crate::resource::Resource::Flour);
-            if flour_have < 1.0 {
-                crate::inventory::add(&mut agent.inventory, crate::resource::Resource::Flour, 0.5);
+        for r in crate::resource::Resource::iter() {
+            let have = crate::inventory::get(&agent.inventory, r);
+            if have > 0.0 {
+                let lost = have * r.spoilage_rate();
+                crate::inventory::sub(&mut agent.inventory, r, lost);
             }
+        }
+    }
+
+    // 7. Labor Reallocation (Individualized)
+    let switch_fees = reallocate_labor(tick_num, agents, market, recipes);
+
+    // 7. Royal Treasury: collect taxes and redistribute
+    let mut treasury = switch_fees;
+
+    // Collect proportional tax from all agents
+    for agent in agents.iter_mut() {
+        let tax = agent.gold * crate::config::TAX_RATE;
+        agent.gold -= tax;
+        treasury += tax;
+    }
+
+    // Redistribute equally to all agents
+    let dividend = treasury / agents.len() as f32;
+    for agent in agents.iter_mut() {
+        agent.gold += dividend;
+    }
+
+    // Subsistence foraging: agents who can't eat forage enough to barely survive
+    for agent in agents.iter_mut() {
+        let flour_have = crate::inventory::get(&agent.inventory, crate::resource::Resource::Flour);
+        if flour_have < 1.0 {
+            crate::inventory::add(&mut agent.inventory, crate::resource::Resource::Flour, 0.5);
         }
     }
 }
 
-fn reallocate_labor(tick_num: u64, agents: &mut [Agent], market: &Market, recipes: &[Recipe]) {
+fn reallocate_labor(
+    tick_num: u64,
+    agents: &mut [Agent],
+    market: &Market,
+    recipes: &[Recipe],
+) -> f32 {
     use crate::resource::Resource;
     use rand::Rng;
 
@@ -149,12 +179,12 @@ fn reallocate_labor(tick_num: u64, agents: &mut [Agent], market: &Market, recipe
             // Primary producers: higher flour + tools + planks + cloth
             1.2 * market.last_price(Resource::Flour)
                 + 0.2 * market.last_price(Resource::Tools)
-                + 0.1 * market.last_price(Resource::Planks)
+                + 0.2 * market.last_price(Resource::Planks)
                 + 0.2 * market.last_price(Resource::Cloth)
         } else {
             1.0 * market.last_price(Resource::Flour)
                 + 0.3 * market.last_price(Resource::Tools)
-                + 0.1 * market.last_price(Resource::Planks)
+                + 0.2 * market.last_price(Resource::Planks)
                 + 0.2 * market.last_price(Resource::Cloth)
         };
 
@@ -163,7 +193,7 @@ fn reallocate_labor(tick_num: u64, agents: &mut [Agent], market: &Market, recipe
     }
 
     if profits.is_empty() {
-        return;
+        return 0.0;
     }
 
     // Sort by profit descending
@@ -174,6 +204,7 @@ fn reallocate_labor(tick_num: u64, agents: &mut [Agent], market: &Market, recipe
     let avg_per_role = non_producer_count / RECIPE_COUNT as f32;
     let max_role_count = (avg_per_role * 1.5).ceil() as u32;
 
+    let mut total_fees = 0.0f32;
     let mut rng = rand::thread_rng();
     for agent in agents.iter_mut() {
         if agent.is_merchant {
@@ -215,7 +246,9 @@ fn reallocate_labor(tick_num: u64, agents: &mut [Agent], market: &Market, recipe
             && best_profit > crate::config::MIN_PROFIT_THRESHOLD
             && agent.gold >= crate::config::ROLE_SWITCH_COST
         {
-            agent.switch_to_role(best_role, recipes);
+            total_fees += agent.switch_to_role(best_role, recipes);
         }
     }
+
+    total_fees
 }

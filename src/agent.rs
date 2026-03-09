@@ -25,14 +25,15 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub fn switch_to_role(&mut self, role_index: usize, recipes: &[Recipe]) {
+    /// Switches to a new role. Returns the switching fee paid (for the royal treasury).
+    pub fn switch_to_role(&mut self, role_index: usize, recipes: &[Recipe]) -> f32 {
         if self.is_merchant {
-            return;
+            return 0.0;
         }
 
         // Switching cost check
         if self.gold < ROLE_SWITCH_COST {
-            return;
+            return 0.0;
         }
         self.gold -= ROLE_SWITCH_COST;
 
@@ -81,6 +82,8 @@ impl Agent {
 
         // Learning penalty: switching roles drops efficiency
         self.efficiency = 0.4;
+
+        ROLE_SWITCH_COST
     }
 
     pub fn produce(&mut self, recipes: &[Recipe], congestion_factor: f32) {
@@ -201,11 +204,6 @@ pub fn generate_orders(
 
     let mut budget = agent.gold;
 
-    // Compute cost-floor for intermediaries: don't sell below input cost + margin
-    let total_input_cost: f32 = Resource::iter()
-        .map(|res| inventory::get(&input_rates, res) * inventory::get(last_prices, res))
-        .sum();
-
     // === SELL surplus production first (generates gold for buys) ===
     for r in Resource::iter() {
         if !produced.contains(&r) {
@@ -227,13 +225,7 @@ pub fn generate_orders(
                 0.5
             };
             let sell_factor = SELL_PRICE_HIGH - (SELL_PRICE_HIGH - SELL_PRICE_LOW) * fullness;
-            // Cost floor: intermediaries never sell below input cost + 10% margin
-            let cost_floor = if prod_rate > 0.0 {
-                (total_input_cost / prod_rate) * 1.1
-            } else {
-                0.0
-            };
-            let sell_price = (price * sell_factor).max(cost_floor).max(MIN_PRICE);
+            let sell_price = (price * sell_factor).max(MIN_PRICE);
             orders.push(Order {
                 id: *next_order_id,
                 agent_id: agent.id,
@@ -408,7 +400,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            5,
+            6,
         ),
         (
             "Miller",
@@ -420,7 +412,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            4,
+            3,
         ),
         (
             "Lumber",
@@ -432,7 +424,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            4,
+            3,
         ),
         (
             "Sawyer",
@@ -478,7 +470,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            3,
+            2,
         ),
         (
             "Shepherd",
@@ -510,9 +502,9 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
 
             let mut inv = inventory::empty_vec();
             // Start with some basic food, tools, and cloth
-            inventory::set(&mut inv, Resource::Flour, rng.gen_range(10.0..20.0));
-            inventory::set(&mut inv, Resource::Tools, rng.gen_range(2.0..5.0));
-            inventory::set(&mut inv, Resource::Cloth, rng.gen_range(2.0..4.0));
+            inventory::set(&mut inv, Resource::Flour, rng.gen_range(15.0..25.0));
+            inventory::set(&mut inv, Resource::Tools, rng.gen_range(3.0..6.0));
+            inventory::set(&mut inv, Resource::Cloth, rng.gen_range(3.0..6.0));
 
             // Initial role-specific inventory
             if role_idx == 3 {

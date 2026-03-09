@@ -36,6 +36,23 @@ impl Resource {
     }
 }
 
+impl Resource {
+    pub fn spoilage_rate(&self) -> f32 {
+        use crate::config::*;
+        match self {
+            Resource::Grain | Resource::Flour | Resource::Herbs => SPOILAGE_PERISHABLE,
+            Resource::Timber
+            | Resource::Wool
+            | Resource::Clay
+            | Resource::IronOre
+            | Resource::Stone => SPOILAGE_RAW,
+            Resource::Planks | Resource::IronIngots | Resource::Tools | Resource::Cloth => {
+                SPOILAGE_PROCESSED
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for Resource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
@@ -59,32 +76,32 @@ pub fn all_recipes() -> Vec<Recipe> {
         // Lumberjack: produces timber from nothing (primary resource)
         Recipe {
             output: Resource::Timber,
-            output_qty: 3.0,
+            output_qty: 2.0,
             inputs: &[],
         },
         // Miner: produces iron ore from nothing (primary resource)
         Recipe {
             output: Resource::IronOre,
-            output_qty: 2.0,
+            output_qty: 1.5,
             inputs: &[],
         },
         // Miller: grain -> flour (processing adds value, more output than input)
         Recipe {
             output: Resource::Flour,
-            output_qty: 5.0,
+            output_qty: 8.0,
             inputs: &[(Resource::Grain, 2.0)],
         },
         // Sawmill: timber -> planks (processing adds value)
         Recipe {
             output: Resource::Planks,
-            output_qty: 5.0,
+            output_qty: 4.0,
             inputs: &[(Resource::Timber, 2.0)],
         },
         // Smelter: iron ore + timber -> iron ingots
         Recipe {
             output: Resource::IronIngots,
-            output_qty: 3.0,
-            inputs: &[(Resource::IronOre, 2.0), (Resource::Timber, 1.0)],
+            output_qty: 2.0,
+            inputs: &[(Resource::IronOre, 1.5), (Resource::Timber, 1.0)],
         },
         // Blacksmith: iron ingots + planks -> tools
         Recipe {
@@ -95,14 +112,14 @@ pub fn all_recipes() -> Vec<Recipe> {
         // Shepherd: produces wool from nothing (primary resource)
         Recipe {
             output: Resource::Wool,
-            output_qty: 3.0,
+            output_qty: 2.0,
             inputs: &[],
         },
         // Weaver: wool -> cloth (processing adds value)
         Recipe {
             output: Resource::Cloth,
             output_qty: 3.0,
-            inputs: &[(Resource::Wool, 2.0)],
+            inputs: &[(Resource::Wool, 1.5)],
         },
     ]
 }
