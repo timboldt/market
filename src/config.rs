@@ -42,7 +42,7 @@ pub const MIN_PRICE: f32 = 0.5;
 pub const TAX_RATE: f32 = 0.03;
 
 // Congestion: roles with more than this many agents suffer diminishing returns
-pub const ROLE_SATURATION_POINT: f32 = 4.0;
+pub const ROLE_SATURATION_POINT: f32 = 40.0;
 
 // Economic Friction
 pub const ROLE_SWITCH_COST: f32 = 75.0;

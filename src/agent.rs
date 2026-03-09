@@ -400,7 +400,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            6,
+            65,
         ),
         (
             "Miller",
@@ -412,7 +412,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            3,
+            35,
         ),
         (
             "Lumber",
@@ -424,7 +424,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            3,
+            35,
         ),
         (
             "Sawyer",
@@ -435,7 +435,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Tools, 0.3),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            2,
+            20,
         ),
         (
             "Miner",
@@ -447,7 +447,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            3,
+            30,
         ),
         (
             "Smelter",
@@ -459,7 +459,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            2,
+            20,
         ),
         (
             "Smith",
@@ -470,7 +470,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            2,
+            20,
         ),
         (
             "Shepherd",
@@ -482,14 +482,14 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                 (Resource::Planks, PLANK_CONSUMPTION),
                 (Resource::Cloth, CLOTH_CONSUMPTION),
             ],
-            3,
+            30,
         ),
         (
             "Weaver",
             8,
             vec![8],
             vec![(Resource::Flour, FLOUR_CONSUMPTION), (Resource::Tools, 0.3)],
-            2,
+            20,
         ),
     ];
 
@@ -556,7 +556,7 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
     agents.push(Agent {
         id,
         name: "Merchant",
-        gold: STARTING_GOLD * 5.0,
+        gold: STARTING_GOLD * 50.0,
         inventory: inv,
         recipes: vec![],
         consumption: c,

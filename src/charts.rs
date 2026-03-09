@@ -5,7 +5,7 @@ use strum::IntoEnumIterator;
 
 use crate::resource::Resource;
 
-const OUTPUT_DIR: &str = "output";
+pub const OUTPUT_DIR: &str = "output";
 
 /// Collected data from each tick for charting.
 #[derive(Default)]
@@ -73,6 +73,109 @@ impl SimHistory {
         self.draw_wealth_chart().unwrap_or_else(|e| {
             eprintln!("Error drawing wealth chart: {}", e);
         });
+    }
+
+    /// Print health metrics for the last N ticks of the simulation.
+    pub fn print_health_summary(&self, tail_ticks: usize) {
+        let ticks = self.prices.len();
+        if ticks == 0 {
+            println!("No data collected.");
+            return;
+        }
+
+        let start = ticks.saturating_sub(tail_ticks);
+        let window = &self.trade_counts[start..];
+        let price_window = &self.prices[start..];
+        let role_window = &self.role_counts[start..];
+        let gold_window = &self.agent_golds[start..];
+
+        // Trade volume
+        let avg_trades: f32 = window.iter().map(|&c| c as f32).sum::<f32>() / window.len() as f32;
+        let min_trades = *window.iter().min().unwrap_or(&0);
+
+        // Price health: average price per resource, count of resources stuck at MIN_PRICE
+        let num_resources = crate::config::RESOURCE_COUNT;
+        let mut avg_prices = vec![0.0f32; num_resources];
+        let mut min_prices = vec![f32::MAX; num_resources];
+        for p in price_window {
+            for (i, &val) in p.iter().enumerate() {
+                avg_prices[i] += val;
+                min_prices[i] = min_prices[i].min(val);
+            }
+        }
+        for p in &mut avg_prices {
+            *p /= price_window.len() as f32;
+        }
+
+        let floor_price = crate::config::MIN_PRICE * 1.1;
+        let stuck_at_floor: Vec<&str> = Resource::iter()
+            .filter(|r| avg_prices[*r as usize] < floor_price)
+            .map(|r| r.short_name())
+            .collect();
+
+        // Role health: any roles with 0 agents?
+        let last_roles = role_window.last().unwrap();
+        let empty_roles: usize = last_roles.iter().filter(|&&c| c == 0).count();
+
+        // Wealth distribution (Gini coefficient from last tick)
+        let last_golds = gold_window.last().unwrap();
+        let gini = compute_gini(last_golds);
+
+        // Average efficiency from last tick gold values
+        // (we don't track efficiency directly, but we can infer from gold spread)
+        let total_gold: f32 = last_golds.iter().sum();
+        let median_gold = last_golds[last_golds.len() / 2];
+        let max_gold = *last_golds.last().unwrap_or(&0.0);
+        let min_gold = *last_golds.first().unwrap_or(&0.0);
+
+        // Overall health score (0-100)
+        let trade_score = (avg_trades / 50.0).min(1.0) * 25.0; // 25 pts for >=50 trades/tick
+        let floor_score = (1.0 - stuck_at_floor.len() as f32 / num_resources as f32) * 25.0;
+        let role_score = (1.0 - empty_roles as f32 / crate::config::RECIPE_COUNT as f32) * 25.0;
+        let gini_score = (1.0 - gini).max(0.0) * 25.0; // 25 pts for perfect equality
+        let health = trade_score + floor_score + role_score + gini_score;
+
+        println!("=== Health Summary (last {} ticks) ===", window.len());
+        println!(
+            "  Avg trades/tick:  {:.1} (min: {})",
+            avg_trades, min_trades
+        );
+        println!("  Total gold:       {:.0}", total_gold);
+        println!(
+            "  Gold range:       {:.1} / {:.1} / {:.1} (min/median/max)",
+            min_gold, median_gold, max_gold
+        );
+        println!("  Gini coefficient: {:.3}", gini);
+        println!("  Empty roles:      {}", empty_roles);
+        if stuck_at_floor.is_empty() {
+            println!("  At price floor:   none");
+        } else {
+            println!("  At price floor:   {}", stuck_at_floor.join(", "));
+        }
+        println!();
+
+        // Per-resource average prices
+        print!("  Avg prices:      ");
+        for r in Resource::iter() {
+            let p = avg_prices[r as usize];
+            print!(" {}:{:.1}", r.short_name().trim(), p);
+        }
+        println!();
+
+        // Role distribution
+        print!("  Roles:           ");
+        let role_names = [
+            "Farm", "Lumb", "Mine", "Mill", "Sawy", "Smlt", "Smth", "Shep", "Weav",
+        ];
+        for (i, name) in role_names.iter().enumerate() {
+            if i < last_roles.len() {
+                print!(" {}:{}", name, last_roles[i]);
+            }
+        }
+        println!();
+
+        println!();
+        println!("  HEALTH SCORE:     {:.0}/100", health);
     }
 
     fn draw_price_chart(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -376,4 +479,21 @@ impl SimHistory {
         println!("Saved: {}/wealth.png", OUTPUT_DIR);
         Ok(())
     }
+}
+
+/// Compute the Gini coefficient from a sorted list of values.
+fn compute_gini(sorted_values: &[f32]) -> f32 {
+    let n = sorted_values.len() as f32;
+    if n == 0.0 {
+        return 0.0;
+    }
+    let total: f32 = sorted_values.iter().sum();
+    if total <= 0.0 {
+        return 0.0;
+    }
+    let mut numerator = 0.0f32;
+    for (i, &val) in sorted_values.iter().enumerate() {
+        numerator += (2.0 * (i as f32 + 1.0) - n - 1.0) * val;
+    }
+    numerator / (n * total)
 }

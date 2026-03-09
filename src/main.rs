@@ -32,6 +32,14 @@ struct Args {
     /// Generate PNG charts after simulation
     #[arg(long)]
     graph: bool,
+
+    /// Suppress per-tick output (only show summary)
+    #[arg(long)]
+    quiet: bool,
+
+    /// Number of trailing ticks to use for health summary (default: 500)
+    #[arg(long, default_value_t = 500)]
+    summary_window: usize,
 }
 
 fn main() {
@@ -43,16 +51,22 @@ fn main() {
     let mut next_order_id: u64 = 0;
     let mut history = charts::SimHistory::new();
 
-    display::print_header();
+    if !args.quiet {
+        display::print_header();
+    }
 
     let mut tick = 0u64;
     loop {
         tick += 1;
 
         simulation::tick(tick, &mut agents, &mut market, &recipes, &mut next_order_id);
-        display::print_tick(tick, &market, &agents);
 
-        if args.graph {
+        if !args.quiet {
+            display::print_tick(tick, &market, &agents);
+        }
+
+        // Always record if graphing or if we need summary metrics
+        if args.graph || args.quiet {
             history.record_tick(&market, &agents, &recipes);
         }
 
@@ -65,10 +79,15 @@ fn main() {
         }
     }
 
-    println!("\nSimulation complete after {} ticks.", tick);
+    println!(
+        "\nSimulation complete after {} ticks (seed={}).",
+        tick, args.seed
+    );
+
+    history.print_health_summary(args.summary_window);
 
     if args.graph {
-        println!("\nGenerating charts...");
+        println!("Generating charts...");
         history.generate_charts(&recipes);
     }
 }
