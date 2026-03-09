@@ -49,9 +49,19 @@ pub fn tick(
         agent.produce(recipes, cf);
     }
 
-    // 2. Order submission
-    for agent in agents.iter() {
+    // 2. Order submission (track pending orders for price bias feedback)
+    for agent in agents.iter_mut() {
         let orders = generate_orders(agent, recipes, &market.last_prices, next_order_id);
+        for order in &orders {
+            match order.side {
+                crate::order::Side::Sell => {
+                    crate::inventory::add(&mut agent.pending_sells, order.resource, order.quantity);
+                }
+                crate::order::Side::Buy => {
+                    crate::inventory::add(&mut agent.pending_buys, order.resource, order.quantity);
+                }
+            }
+        }
         for order in orders {
             market.submit_order(order);
         }
@@ -60,7 +70,7 @@ pub fn tick(
     // 3. Market clearing
     market.clear_all();
 
-    // 4. Apply trades to agents
+    // 4. Apply trades to agents and update price bias
     for trade in &market.trades_this_tick {
         let cost = trade.price * trade.quantity;
 
@@ -79,6 +89,11 @@ pub fn tick(
             trade.resource,
             trade.quantity,
         );
+    }
+
+    // 4b. Update price bias based on filled/unfilled orders
+    for agent in agents.iter_mut() {
+        crate::agent::update_price_bias(agent, &market.trades_this_tick);
     }
 
     // 5. Consumption

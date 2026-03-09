@@ -22,6 +22,13 @@ pub struct Agent {
     pub efficiency: f32,           // 0.0 to 1.0, affects production
     pub role_index: Option<usize>, // index of their primary role
     pub personality: Personality,
+    /// Per-resource price bias from unfilled orders. >1.0 means "willing to pay/accept more",
+    /// <1.0 means "need to lower my price". Sellers multiply sell price by this; buyers divide.
+    pub price_bias: ResourceVec,
+    /// Tracks which resources had pending sell orders last tick (for feedback).
+    pub pending_sells: ResourceVec,
+    /// Tracks which resources had pending buy orders last tick (for feedback).
+    pub pending_buys: ResourceVec,
 }
 
 impl Agent {
@@ -174,6 +181,54 @@ impl Agent {
     }
 }
 
+/// Update an agent's price bias based on which orders filled vs went unfilled.
+/// Called after trades are applied each tick.
+pub fn update_price_bias(agent: &mut Agent, trades: &[crate::order::Trade]) {
+    // Figure out which resources this agent traded
+    let mut sold = inventory::empty_vec();
+    let mut bought = inventory::empty_vec();
+    for trade in trades {
+        if trade.seller_id == agent.id {
+            inventory::add(&mut sold, trade.resource, trade.quantity);
+        }
+        if trade.buyer_id == agent.id {
+            inventory::add(&mut bought, trade.resource, trade.quantity);
+        }
+    }
+
+    let bias_step = 0.05; // 5% adjustment per tick
+    let recovery = 0.02; // 2% recovery toward 1.0 per tick
+
+    for r in Resource::iter() {
+        let pending_sell = inventory::get(&agent.pending_sells, r);
+        let pending_buy = inventory::get(&agent.pending_buys, r);
+        let qty_sold = inventory::get(&sold, r);
+        let qty_bought = inventory::get(&bought, r);
+        let bias = inventory::get(&agent.price_bias, r);
+
+        let new_bias = if pending_sell > 0.1 && qty_sold < pending_sell * 0.5 {
+            // Sell order mostly unfilled → lower price (bias decreases)
+            (bias - bias_step).max(0.5)
+        } else if pending_buy > 0.1 && qty_bought < pending_buy * 0.5 {
+            // Buy order mostly unfilled → raise bid (bias increases)
+            (bias + bias_step).min(2.0)
+        } else {
+            // Orders filled or no orders → recover toward 1.0
+            if bias < 1.0 {
+                (bias + recovery).min(1.0)
+            } else {
+                (bias - recovery).max(1.0)
+            }
+        };
+
+        inventory::set(&mut agent.price_bias, r, new_bias);
+    }
+
+    // Clear pending orders for next tick
+    agent.pending_sells = inventory::empty_vec();
+    agent.pending_buys = inventory::empty_vec();
+}
+
 pub fn generate_orders(
     agent: &Agent,
     recipes: &[Recipe],
@@ -225,7 +280,8 @@ pub fn generate_orders(
                 0.5
             };
             let sell_factor = SELL_PRICE_HIGH - (SELL_PRICE_HIGH - SELL_PRICE_LOW) * fullness;
-            let sell_price = (price * sell_factor).max(MIN_PRICE);
+            let bias = inventory::get(&agent.price_bias, r);
+            let sell_price = (price * sell_factor * bias).max(MIN_PRICE);
             orders.push(Order {
                 id: *next_order_id,
                 agent_id: agent.id,
@@ -258,7 +314,8 @@ pub fn generate_orders(
             // Dynamic buy pricing: higher urgency when supply is low
             let urgency = (1.0 - ticks_supply / (INPUT_TARGET_TICKS * 2.0)).clamp(0.0, 1.0);
             let buy_factor = BUY_PRICE_LOW + (BUY_PRICE_HIGH - BUY_PRICE_LOW) * urgency;
-            let buy_price = (price * buy_factor).max(MIN_PRICE);
+            let bias = inventory::get(&agent.price_bias, r);
+            let buy_price = (price * buy_factor * bias).max(MIN_PRICE);
             let max_qty = budget / buy_price;
             let qty = deficit.min(max_qty);
             if qty > MIN_ORDER_QTY {
@@ -305,7 +362,8 @@ pub fn generate_orders(
 
             let buy_factor =
                 (BUY_PRICE_LOW + (BUY_PRICE_HIGH - BUY_PRICE_LOW) * urgency) * wealth_factor;
-            let buy_price = (price * buy_factor).max(MIN_PRICE);
+            let bias = inventory::get(&agent.price_bias, r);
+            let buy_price = (price * buy_factor * bias).max(MIN_PRICE);
             let max_qty = budget / buy_price;
             let qty = deficit.min(max_qty);
             if qty > MIN_ORDER_QTY {
@@ -539,6 +597,9 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
                     ambition: rng.gen_range(0.7..1.3),
                     patience: rng.gen_range(10..40),
                 },
+                price_bias: inventory::ones_vec(),
+                pending_sells: inventory::empty_vec(),
+                pending_buys: inventory::empty_vec(),
             });
             id += 1;
         }
@@ -567,6 +628,9 @@ pub fn create_agents(seed: u64) -> Vec<Agent> {
             ambition: 1.0,
             patience: 100,
         },
+        price_bias: inventory::ones_vec(),
+        pending_sells: inventory::empty_vec(),
+        pending_buys: inventory::empty_vec(),
     });
 
     agents

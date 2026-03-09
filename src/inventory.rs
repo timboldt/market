@@ -7,6 +7,10 @@ pub fn empty_vec() -> ResourceVec {
     [0.0; RESOURCE_COUNT]
 }
 
+pub fn ones_vec() -> ResourceVec {
+    [1.0; RESOURCE_COUNT]
+}
+
 pub fn get(v: &ResourceVec, r: Resource) -> f32 {
     v[r as usize]
 }
