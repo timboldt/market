@@ -1,4 +1,5 @@
 pub const RESOURCE_COUNT: usize = 11;
+pub const RECIPE_COUNT: usize = 7;
 
 pub const STARTING_GOLD: f32 = 200.0;
 pub const DEFAULT_PRICE: f32 = 10.0;
@@ -33,3 +34,13 @@ pub const MIN_PRICE: f32 = 0.5;
 
 // Poverty threshold for foraging (subsistence)
 pub const POVERTY_THRESHOLD: f32 = 25.0;
+
+// Congestion: roles with more than this many agents suffer diminishing returns
+pub const ROLE_SATURATION_POINT: f32 = 3.0;
+
+// Economic Friction
+pub const ROLE_SWITCH_COST: f32 = 50.0;
+pub const MIN_PROFIT_THRESHOLD: f32 = 5.0;
+
+// Anti-herding: agents pick randomly from the top N most profitable roles
+pub const TOP_N_ROLES: usize = 3;

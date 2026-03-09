@@ -5,6 +5,12 @@ use crate::inventory::{self, ResourceVec};
 use crate::order::{Order, Side};
 use crate::resource::{Recipe, Resource};
 
+#[derive(Debug, Clone, Copy)]
+pub struct Personality {
+    pub ambition: f32, // 0.7 to 1.3, multiplier on profit requirement
+    pub patience: u64, // 10 to 40, how often they check for a new role
+}
+
 pub struct Agent {
     pub id: usize,
     pub name: &'static str,
@@ -13,11 +19,62 @@ pub struct Agent {
     pub recipes: Vec<usize>,
     pub consumption: ResourceVec,
     pub is_merchant: bool,
-    pub efficiency: f32, // 0.0 to 1.0, affects production
+    pub efficiency: f32,           // 0.0 to 1.0, affects production
+    pub role_index: Option<usize>, // index of their primary role
+    pub personality: Personality,
 }
 
 impl Agent {
-    pub fn produce(&mut self, recipes: &[Recipe]) {
+    pub fn switch_to_role(&mut self, role_index: usize, recipes: &[Recipe]) {
+        if self.is_merchant {
+            return;
+        }
+
+        // Switching cost check
+        if self.gold < ROLE_SWITCH_COST {
+            return;
+        }
+        self.gold -= ROLE_SWITCH_COST;
+
+        let recipe = &recipes[role_index];
+        self.recipes = vec![role_index];
+        self.role_index = Some(role_index);
+
+        // Match on output to find a static name and set appropriate consumption
+        self.name = match recipe.output {
+            Resource::Grain => "Farmer",
+            Resource::Timber => "Lumber",
+            Resource::IronOre => "Miner",
+            Resource::Flour => "Miller",
+            Resource::Planks => "Sawyer",
+            Resource::IronIngots => "Smelter",
+            Resource::Tools => "Smith",
+            _ => "Worker",
+        };
+
+        // Update consumption to match new role
+        self.consumption = inventory::empty_vec();
+        if recipe.inputs.is_empty() {
+            // Primary producers: eat more flour, use tools and planks
+            inventory::set(&mut self.consumption, Resource::Flour, 1.2);
+            inventory::set(&mut self.consumption, Resource::Tools, TOOL_CONSUMPTION);
+            inventory::set(&mut self.consumption, Resource::Planks, PLANK_CONSUMPTION);
+        } else if recipe.output == Resource::Tools {
+            // Blacksmith: flour + planks
+            inventory::set(&mut self.consumption, Resource::Flour, FLOUR_CONSUMPTION);
+            inventory::set(&mut self.consumption, Resource::Planks, PLANK_CONSUMPTION);
+        } else {
+            // Other intermediaries: flour + tools + planks
+            inventory::set(&mut self.consumption, Resource::Flour, FLOUR_CONSUMPTION);
+            inventory::set(&mut self.consumption, Resource::Tools, 0.3);
+            inventory::set(&mut self.consumption, Resource::Planks, PLANK_CONSUMPTION);
+        }
+
+        // Learning penalty: switching roles drops efficiency
+        self.efficiency = 0.4;
+    }
+
+    pub fn produce(&mut self, recipes: &[Recipe], congestion_factor: f32) {
         // Efficiency check: if we lack tools, we are less efficient (for primary producers)
         let tool_efficiency = if self.recipes.iter().any(|&ri| recipes[ri].inputs.is_empty()) {
             let tools = inventory::get(&self.inventory, Resource::Tools);
@@ -30,7 +87,7 @@ impl Agent {
             1.0
         };
 
-        let current_efficiency = self.efficiency * tool_efficiency;
+        let current_efficiency = self.efficiency * tool_efficiency * congestion_factor;
 
         for &ri in &self.recipes {
             let recipe = &recipes[ri];
@@ -105,54 +162,9 @@ impl Agent {
     }
 }
 
-pub struct AgentContext {
-    pub produced_resources: Vec<Vec<Resource>>,
-    pub input_resources: Vec<Vec<Resource>>,
-    pub output_rate: Vec<ResourceVec>,
-    pub input_rate: Vec<ResourceVec>, // how much of each input consumed per production cycle
-}
-
-impl AgentContext {
-    pub fn build(agents: &[Agent], recipes: &[Recipe]) -> Self {
-        let mut produced = Vec::new();
-        let mut inputs = Vec::new();
-        let mut output_rate = Vec::new();
-        let mut input_rate = Vec::new();
-
-        for agent in agents {
-            let mut pr = Vec::new();
-            let mut ir = Vec::new();
-            let mut orates = inventory::empty_vec();
-            let mut irates = inventory::empty_vec();
-            for &ri in &agent.recipes {
-                let recipe = &recipes[ri];
-                pr.push(recipe.output);
-                inventory::add(&mut orates, recipe.output, recipe.output_qty);
-                for &(res, qty) in recipe.inputs {
-                    if !ir.contains(&res) {
-                        ir.push(res);
-                    }
-                    inventory::add(&mut irates, res, qty);
-                }
-            }
-            produced.push(pr);
-            inputs.push(ir);
-            output_rate.push(orates);
-            input_rate.push(irates);
-        }
-
-        Self {
-            produced_resources: produced,
-            input_resources: inputs,
-            output_rate,
-            input_rate,
-        }
-    }
-}
-
-pub fn generate_orders_with_context(
+pub fn generate_orders(
     agent: &Agent,
-    ctx: &AgentContext,
+    recipes: &[Recipe],
     last_prices: &ResourceVec,
     next_order_id: &mut u64,
 ) -> Vec<Order> {
@@ -161,16 +173,28 @@ pub fn generate_orders_with_context(
     }
 
     let mut orders = Vec::new();
-    let produced = &ctx.produced_resources[agent.id];
-    let needed_inputs = &ctx.input_resources[agent.id];
-    let output_rates = &ctx.output_rate[agent.id];
-    let input_rates = &ctx.input_rate[agent.id];
+    let mut produced = Vec::new();
+    let mut needed_inputs = Vec::new();
+    let mut output_rates = inventory::empty_vec();
+    let mut input_rates = inventory::empty_vec();
+
+    for &ri in &agent.recipes {
+        let recipe = &recipes[ri];
+        produced.push(recipe.output);
+        inventory::add(&mut output_rates, recipe.output, recipe.output_qty);
+        for &(res, qty) in recipe.inputs {
+            if !needed_inputs.contains(&res) {
+                needed_inputs.push(res);
+            }
+            inventory::add(&mut input_rates, res, qty);
+        }
+    }
 
     let mut budget = agent.gold;
 
     // Compute cost-floor for intermediaries: don't sell below input cost + margin
     let total_input_cost: f32 = Resource::iter()
-        .map(|res| inventory::get(input_rates, res) * inventory::get(last_prices, res))
+        .map(|res| inventory::get(&input_rates, res) * inventory::get(last_prices, res))
         .sum();
 
     // === SELL surplus production first (generates gold for buys) ===
@@ -180,7 +204,7 @@ pub fn generate_orders_with_context(
         }
         let have = inventory::get(&agent.inventory, r);
         let consume_rate = inventory::get(&agent.consumption, r);
-        let prod_rate = inventory::get(output_rates, r);
+        let prod_rate = inventory::get(&output_rates, r);
         let price = inventory::get(last_prices, r);
 
         let buffer = (consume_rate + prod_rate) * COMFORT_BUFFER_TICKS;
@@ -219,7 +243,7 @@ pub fn generate_orders_with_context(
             continue;
         }
         let have = inventory::get(&agent.inventory, r);
-        let need_rate = inventory::get(input_rates, r);
+        let need_rate = inventory::get(&input_rates, r);
         let price = inventory::get(last_prices, r);
 
         let target = need_rate * INPUT_TARGET_TICKS;
@@ -356,151 +380,137 @@ fn merchant_orders(
     orders
 }
 
-pub fn create_agents() -> Vec<Agent> {
+pub fn create_agents(seed: u64) -> Vec<Agent> {
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
+    let mut rng = StdRng::seed_from_u64(seed);
     let mut agents = Vec::new();
+    let mut id = 0;
 
-    // 0: Farmer - produces grain, consumes flour (food) + tools + planks
-    let mut c = inventory::empty_vec();
-    inventory::set(&mut c, Resource::Flour, 1.2);
-    inventory::set(&mut c, Resource::Tools, TOOL_CONSUMPTION);
-    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
-    let mut inv = inventory::empty_vec();
-    inventory::set(&mut inv, Resource::Flour, 15.0);
-    inventory::set(&mut inv, Resource::Tools, 5.0);
-    inventory::set(&mut inv, Resource::Planks, 3.0);
-    agents.push(Agent {
-        id: 0,
-        name: "Farmer",
-        gold: STARTING_GOLD,
-        inventory: inv,
-        recipes: vec![0],
-        consumption: c,
-        is_merchant: false,
-        efficiency: 1.0,
-    });
+    // Define role counts
+    let roles = vec![
+        (
+            "Farmer",
+            0,
+            vec![0],
+            vec![
+                (Resource::Flour, 1.2),
+                (Resource::Tools, TOOL_CONSUMPTION),
+                (Resource::Planks, PLANK_CONSUMPTION),
+            ],
+            4,
+        ),
+        (
+            "Miller",
+            3,
+            vec![3],
+            vec![
+                (Resource::Flour, FLOUR_CONSUMPTION),
+                (Resource::Tools, 0.3),
+                (Resource::Planks, PLANK_CONSUMPTION),
+            ],
+            3,
+        ),
+        (
+            "Lumber",
+            1,
+            vec![1],
+            vec![
+                (Resource::Flour, 1.2),
+                (Resource::Tools, TOOL_CONSUMPTION),
+                (Resource::Planks, PLANK_CONSUMPTION),
+            ],
+            3,
+        ),
+        (
+            "Sawyer",
+            4,
+            vec![4],
+            vec![(Resource::Flour, FLOUR_CONSUMPTION), (Resource::Tools, 0.3)],
+            2,
+        ),
+        (
+            "Miner",
+            2,
+            vec![2],
+            vec![
+                (Resource::Flour, 1.2),
+                (Resource::Tools, TOOL_CONSUMPTION),
+                (Resource::Planks, PLANK_CONSUMPTION),
+            ],
+            3,
+        ),
+        (
+            "Smelter",
+            5,
+            vec![5],
+            vec![
+                (Resource::Flour, FLOUR_CONSUMPTION),
+                (Resource::Tools, 0.3),
+                (Resource::Planks, PLANK_CONSUMPTION),
+            ],
+            2,
+        ),
+        (
+            "Smith",
+            6,
+            vec![6],
+            vec![
+                (Resource::Flour, FLOUR_CONSUMPTION),
+                (Resource::Planks, PLANK_CONSUMPTION),
+            ],
+            2,
+        ),
+    ];
 
-    // 1: Miller - grain -> flour, consumes flour (food) + tools + planks
-    let mut c = inventory::empty_vec();
-    inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
-    inventory::set(&mut c, Resource::Tools, 0.3);
-    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
-    let mut inv = inventory::empty_vec();
-    inventory::set(&mut inv, Resource::Grain, 20.0);
-    inventory::set(&mut inv, Resource::Flour, 15.0);
-    inventory::set(&mut inv, Resource::Tools, 3.0);
-    inventory::set(&mut inv, Resource::Planks, 3.0);
-    agents.push(Agent {
-        id: 1,
-        name: "Miller",
-        gold: STARTING_GOLD,
-        inventory: inv,
-        recipes: vec![3],
-        consumption: c,
-        is_merchant: false,
-        efficiency: 1.0,
-    });
+    for (name, role_idx, recipes, cons, count) in roles {
+        for _ in 0..count {
+            let mut c = inventory::empty_vec();
+            for (res, qty) in &cons {
+                inventory::set(&mut c, *res, *qty);
+            }
 
-    // 2: Lumberjack - produces timber, consumes flour + tools + planks
-    let mut c = inventory::empty_vec();
-    inventory::set(&mut c, Resource::Flour, 1.2);
-    inventory::set(&mut c, Resource::Tools, TOOL_CONSUMPTION);
-    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
-    let mut inv = inventory::empty_vec();
-    inventory::set(&mut inv, Resource::Flour, 15.0);
-    inventory::set(&mut inv, Resource::Tools, 5.0);
-    inventory::set(&mut inv, Resource::Planks, 3.0);
-    agents.push(Agent {
-        id: 2,
-        name: "Lumberjack",
-        gold: STARTING_GOLD,
-        inventory: inv,
-        recipes: vec![1],
-        consumption: c,
-        is_merchant: false,
-        efficiency: 1.0,
-    });
+            let mut inv = inventory::empty_vec();
+            // Start with some basic food and tools
+            inventory::set(&mut inv, Resource::Flour, rng.gen_range(10.0..20.0));
+            inventory::set(&mut inv, Resource::Tools, rng.gen_range(2.0..5.0));
 
-    // 3: Sawmill - timber -> planks, consumes flour + tools
-    let mut c = inventory::empty_vec();
-    inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
-    inventory::set(&mut c, Resource::Tools, 0.3);
-    let mut inv = inventory::empty_vec();
-    inventory::set(&mut inv, Resource::Flour, 15.0);
-    inventory::set(&mut inv, Resource::Timber, 15.0);
-    inventory::set(&mut inv, Resource::Tools, 3.0);
-    agents.push(Agent {
-        id: 3,
-        name: "Sawmill",
-        gold: STARTING_GOLD,
-        inventory: inv,
-        recipes: vec![4],
-        consumption: c,
-        is_merchant: false,
-        efficiency: 1.0,
-    });
+            // Initial role-specific inventory
+            if role_idx == 3 {
+                inventory::set(&mut inv, Resource::Grain, 20.0);
+            }
+            if role_idx == 4 {
+                inventory::set(&mut inv, Resource::Timber, 15.0);
+            }
+            if role_idx == 5 {
+                inventory::set(&mut inv, Resource::IronOre, 10.0);
+                inventory::set(&mut inv, Resource::Timber, 5.0);
+            }
+            if role_idx == 6 {
+                inventory::set(&mut inv, Resource::IronIngots, 5.0);
+                inventory::set(&mut inv, Resource::Planks, 5.0);
+            }
 
-    // 4: Miner - produces iron ore, consumes flour + tools + planks
-    let mut c = inventory::empty_vec();
-    inventory::set(&mut c, Resource::Flour, 1.2);
-    inventory::set(&mut c, Resource::Tools, TOOL_CONSUMPTION);
-    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
-    let mut inv = inventory::empty_vec();
-    inventory::set(&mut inv, Resource::Flour, 15.0);
-    inventory::set(&mut inv, Resource::Tools, 5.0);
-    inventory::set(&mut inv, Resource::Planks, 3.0);
-    agents.push(Agent {
-        id: 4,
-        name: "Miner",
-        gold: STARTING_GOLD,
-        inventory: inv,
-        recipes: vec![2],
-        consumption: c,
-        is_merchant: false,
-        efficiency: 1.0,
-    });
+            agents.push(Agent {
+                id,
+                name,
+                gold: STARTING_GOLD * rng.gen_range(0.8..1.2),
+                inventory: inv,
+                recipes: recipes.clone(),
+                consumption: c,
+                is_merchant: false,
+                efficiency: 1.0,
+                role_index: Some(role_idx),
+                personality: Personality {
+                    ambition: rng.gen_range(0.7..1.3),
+                    patience: rng.gen_range(10..40),
+                },
+            });
+            id += 1;
+        }
+    }
 
-    // 5: Smelter - iron ore + timber -> iron ingots, consumes flour + tools + planks
-    let mut c = inventory::empty_vec();
-    inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
-    inventory::set(&mut c, Resource::Tools, 0.3);
-    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
-    let mut inv = inventory::empty_vec();
-    inventory::set(&mut inv, Resource::Flour, 15.0);
-    inventory::set(&mut inv, Resource::IronOre, 10.0);
-    inventory::set(&mut inv, Resource::Timber, 5.0);
-    inventory::set(&mut inv, Resource::Tools, 3.0);
-    inventory::set(&mut inv, Resource::Planks, 3.0);
-    agents.push(Agent {
-        id: 5,
-        name: "Smelter",
-        gold: STARTING_GOLD,
-        inventory: inv,
-        recipes: vec![5],
-        consumption: c,
-        is_merchant: false,
-        efficiency: 1.0,
-    });
-
-    // 6: Blacksmith - iron ingots + planks -> tools, consumes flour + planks
-    let mut c = inventory::empty_vec();
-    inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
-    inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
-    let mut inv = inventory::empty_vec();
-    inventory::set(&mut inv, Resource::Flour, 15.0);
-    inventory::set(&mut inv, Resource::IronIngots, 5.0);
-    inventory::set(&mut inv, Resource::Planks, 5.0);
-    agents.push(Agent {
-        id: 6,
-        name: "Blacksmith",
-        gold: STARTING_GOLD * 1.5,
-        inventory: inv,
-        recipes: vec![6],
-        consumption: c,
-        is_merchant: false,
-        efficiency: 1.0,
-    });
-
-    // 7: Merchant - buys low sells high, consumes flour + planks
+    // 1 Merchant
     let mut c = inventory::empty_vec();
     inventory::set(&mut c, Resource::Flour, FLOUR_CONSUMPTION);
     inventory::set(&mut c, Resource::Planks, PLANK_CONSUMPTION);
@@ -508,7 +518,7 @@ pub fn create_agents() -> Vec<Agent> {
     inventory::set(&mut inv, Resource::Flour, 20.0);
     inventory::set(&mut inv, Resource::Planks, 3.0);
     agents.push(Agent {
-        id: 7,
+        id,
         name: "Merchant",
         gold: STARTING_GOLD * 5.0,
         inventory: inv,
@@ -516,6 +526,11 @@ pub fn create_agents() -> Vec<Agent> {
         consumption: c,
         is_merchant: true,
         efficiency: 1.0,
+        role_index: None,
+        personality: Personality {
+            ambition: 1.0,
+            patience: 100,
+        },
     });
 
     agents

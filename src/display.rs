@@ -37,19 +37,63 @@ pub fn print_tick(tick: u64, market: &Market, agents: &[Agent]) {
 }
 
 fn print_agent_summary(agents: &[Agent]) {
-    println!("  Agents:");
+    use std::collections::HashMap;
+    let mut role_counts = HashMap::new();
     for agent in agents {
-        print!(
-            "    {:>10} gold:{:>6.1} eff:{:>3.1} |",
-            agent.name, agent.gold, agent.efficiency
-        );
-        for r in Resource::iter() {
-            let qty = crate::inventory::get(&agent.inventory, r);
-            if qty > 0.01 {
-                print!(" {}:{:.0}", r.short_name().trim(), qty);
-            }
-        }
-        println!();
+        *role_counts.entry(agent.name).or_insert(0) += 1;
+    }
+
+    print!("  Population: ");
+    let mut roles: Vec<_> = role_counts.iter().collect();
+    roles.sort_by_key(|(name, _)| *name);
+    for (role, count) in &roles {
+        print!("{}:{} ", role, count);
     }
     println!();
+
+    // Sort agents by gold
+    let mut sorted_agents: Vec<&Agent> = agents.iter().collect();
+    sorted_agents.sort_by(|a, b| b.gold.partial_cmp(&a.gold).unwrap());
+
+    println!("  Top Wealthy:");
+    for agent in sorted_agents.iter().take(5) {
+        println!(
+            "    {:>10} gold:{:>6.1} eff:{:>3.1} | {:<20}",
+            agent.name,
+            agent.gold,
+            agent.efficiency,
+            format_inv(agent)
+        );
+    }
+    println!("  Bottom Wealthy:");
+    for agent in sorted_agents
+        .iter()
+        .rev()
+        .take(5)
+        .collect::<Vec<_>>()
+        .iter()
+        .rev()
+    {
+        println!(
+            "    {:>10} gold:{:>6.1} eff:{:>3.1} | {:<20}",
+            agent.name,
+            agent.gold,
+            agent.efficiency,
+            format_inv(agent)
+        );
+    }
+    println!();
+}
+
+fn format_inv(agent: &Agent) -> String {
+    use crate::resource::Resource;
+    use strum::IntoEnumIterator;
+    let mut s = String::new();
+    for r in Resource::iter() {
+        let qty = crate::inventory::get(&agent.inventory, r);
+        if qty > 0.1 {
+            s.push_str(&format!("{}:{:.0} ", r.short_name().trim(), qty));
+        }
+    }
+    s
 }

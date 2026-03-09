@@ -16,7 +16,7 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(name = "market", about = "Medieval market simulator")]
 struct Args {
-    /// RNG seed (unused for now, reserved for future randomization)
+    /// RNG seed for reproducible simulations
     #[arg(long, default_value_t = 42)]
     seed: u64,
 
@@ -33,8 +33,7 @@ fn main() {
     let args = Args::parse();
 
     let recipes = resource::all_recipes();
-    let mut agents = agent::create_agents();
-    let ctx = agent::AgentContext::build(&agents, &recipes);
+    let mut agents = agent::create_agents(args.seed);
     let mut market = market::Market::new();
     let mut next_order_id: u64 = 0;
 
@@ -44,7 +43,7 @@ fn main() {
     loop {
         tick += 1;
 
-        simulation::tick(&mut agents, &mut market, &recipes, &ctx, &mut next_order_id);
+        simulation::tick(tick, &mut agents, &mut market, &recipes, &mut next_order_id);
         display::print_tick(tick, &market, &agents);
 
         if args.ticks > 0 && tick >= args.ticks {
